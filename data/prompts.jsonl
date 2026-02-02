@@ -1,0 +1,5 @@
+{"messages": [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": "Summarize the benefits of vector search in two sentences."}], "max_tokens": 128}
+{"messages": [{"role": "system", "content": "You are a concise assistant."}, {"role": "user", "content": "Write a short haiku about distributed systems."}], "max_tokens": 64}
+{"messages": [{"role": "system", "content": "You are an SRE."}, {"role": "user", "content": "Explain one common cause of latency spikes."}], "max_tokens": 96}
+{"messages": [{"role": "system", "content": "You are a database expert."}, {"role": "user", "content": "List three tradeoffs of caching in production."}], "max_tokens": 96}
+{"messages": [{"role": "system", "content": "You are a technical writer."}, {"role": "user", "content": "Draft a one-paragraph release note for a gateway API."}], "max_tokens": 128}
