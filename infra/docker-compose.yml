@@ -1,0 +1,57 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: gateway/Dockerfile
+    environment:
+      GATEWAY_VLLM_BASE_URL: http://${VLLM_HOST:-vllm}:8000
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_MODEL_ID: ${MODEL:-Qwen/Qwen2-0.5B-Instruct}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    command:
+      - "--model"
+      - "${MODEL:-Qwen/Qwen2-0.5B-Instruct}"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+    environment:
+      HF_HOME: /data/hf
+    volumes:
+      - ./models:/data
+    profiles: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]
+
+  vllm-cpu:
+    image: vllm/vllm-openai:latest
+    command:
+      - "--model"
+      - "${MODEL:-Qwen/Qwen2-0.5B-Instruct}"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--device"
+      - "cpu"
+    environment:
+      HF_HOME: /data/hf
+    volumes:
+      - ./models:/data
+    profiles: ["cpu"]
