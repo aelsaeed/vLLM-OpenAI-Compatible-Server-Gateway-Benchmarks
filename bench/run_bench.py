@@ -15,15 +15,12 @@ PROMPTS_PATH = Path("data/prompts.jsonl")
 REPORTS_DIR = Path("reports")
 
 
-
-
 def percentile(values: list[float], pct: float) -> float:
     if not values:
         return 0.0
     sorted_values = sorted(values)
     k = int(round((pct / 100) * (len(sorted_values) - 1)))
     return sorted_values[k]
-
 
 
 @dataclass
@@ -80,6 +77,7 @@ async def run_benchmark(args: argparse.Namespace) -> None:
     sem = asyncio.Semaphore(concurrency)
 
     async with httpx.AsyncClient() as client:
+
         async def worker() -> None:
             prompt = random.choice(prompts)
             async with sem:
@@ -100,25 +98,27 @@ async def run_benchmark(args: argparse.Namespace) -> None:
     error_rate = len(errors) / total if total else 0
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    report_lines = [
+        "# Benchmark Report",
+        "",
+        f"- Total requests: {total}",
+        f"- Concurrency: {concurrency}",
+        f"- Duration: {duration:.2f}s",
+        f"- p50 latency: {p50:.3f}s",
+        f"- p95 latency: {p95:.3f}s",
+        f"- RPS: {throughput:.2f}",
+        f"- Tokens/sec (approx): {tokens_per_sec:.2f}",
+        f"- Error rate: {error_rate:.2%}",
+    ]
+
     report_path = REPORTS_DIR / f"bench-{int(time.time())}.md"
-    report_path.write_text(
-        "\n".join(
-            [
-                "# Benchmark Report",
-                "",
-                f"- Total requests: {total}",
-                f"- Concurrency: {concurrency}",
-                f"- Duration: {duration:.2f}s",
-                f"- p50 latency: {p50:.3f}s",
-                f"- p95 latency: {p95:.3f}s",
-                f"- Throughput: {throughput:.2f} req/s",
-                f"- Tokens/sec (approx): {tokens_per_sec:.2f}",
-                f"- Error rate: {error_rate:.2%}",
-            ]
-        )
-    )
+    latest_path = REPORTS_DIR / "latest.md"
+    report_content = "\n".join(report_lines)
+    report_path.write_text(report_content)
+    latest_path.write_text(report_content)
 
     print(f"Report written to {report_path}")
+    print(f"Latest report updated at {latest_path}")
 
 
 def parse_args() -> argparse.Namespace:

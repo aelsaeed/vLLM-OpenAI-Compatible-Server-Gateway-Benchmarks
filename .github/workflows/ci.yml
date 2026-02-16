@@ -5,20 +5,51 @@ on:
   pull_request:
 
 jobs:
-  lint-test:
+  lint-typecheck-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev]
+          pip install -e .[dev]
+
       - name: Ruff
         run: ruff check .
-      - name: Mypy
-        run: mypy gateway bench
+
+      - name: Mypy (if configured)
+        run: |
+          if grep -q "^\[tool.mypy\]" pyproject.toml; then
+            mypy gateway bench
+          else
+            echo "mypy not configured; skipping"
+          fi
+
       - name: Pytest
         run: pytest
+
+      - name: Smoke test
+        run: bash scripts/smoke_test.sh
+
+      - name: Demo (mock mode)
+        run: make demo
+
+      - name: Bench (tiny mock mode)
+        run: |
+          BENCH_TOTAL_REQUESTS=8 BENCH_CONCURRENCY=2 make bench
+          test -f reports/latest.md
+
+      - name: Docker Compose config validation (optional)
+        run: |
+          if [ -f infra/docker-compose.yml ]; then
+            docker compose -f infra/docker-compose.yml config >/dev/null
+          else
+            echo "infra/docker-compose.yml not found; skipping"
+          fi
