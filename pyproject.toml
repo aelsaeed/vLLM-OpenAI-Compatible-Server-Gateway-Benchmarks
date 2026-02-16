@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Local LLM serving stack with vLLM gateway and benchmarking"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Apache-2.0"}
+license = {text = "MIT"}
 authors = [{name = "OpenAI", email = "devnull@example.com"}]
 dependencies = [
   "fastapi>=0.110",
@@ -34,6 +34,8 @@ dev = [
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]

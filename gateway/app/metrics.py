@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 REQUEST_LATENCY = Histogram("gateway_request_latency_seconds", "Latency per request", ["path"])

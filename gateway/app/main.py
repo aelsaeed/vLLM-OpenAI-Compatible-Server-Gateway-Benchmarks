@@ -5,13 +5,15 @@ import json
 import logging
 import time
 import uuid
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 import httpx
 import orjson
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from gateway.app.config import settings
@@ -35,13 +37,19 @@ configure_logging()
 
 rate_limiter = RateLimiter(settings.rate_limit_rps, settings.rate_limit_burst)
 safety_checker = SafetyChecker(settings.max_tokens_cap, settings.denylist_words)
-redis_client: Redis | None = None
+redis_client: Redis[Any] | None = None
 
 
 @app.on_event("startup")
 async def startup() -> None:
     global redis_client
-    redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        await redis.ping()
+        redis_client = redis
+    except RedisError:
+        logger.warning("redis_unavailable_startup", extra={"model_id": settings.model_id})
+        redis_client = None
 
 
 @app.on_event("shutdown")
@@ -51,7 +59,9 @@ async def shutdown() -> None:
 
 
 @app.middleware("http")
-async def request_middleware(request: Request, call_next):
+async def request_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     request.state.request_id = request_id
     client_key = request.client.host if request.client else "unknown"
@@ -62,7 +72,9 @@ async def request_middleware(request: Request, call_next):
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > settings.request_size_limit_bytes:
         record_request(request.url.path, "413")
-        return JSONResponse({"error": "payload_too_large", "request_id": request_id}, status_code=413)
+        return JSONResponse(
+            {"error": "payload_too_large", "request_id": request_id}, status_code=413
+        )
 
     response = await call_next(request)
     response.headers["x-request-id"] = request_id
@@ -131,7 +143,11 @@ async def chat(request: Request) -> Response:
         record_request("/chat", "400")
         logger.info(
             "safety_blocked",
-            extra={"request_id": request_id, "model_id": settings.model_id, "extra": {"reason": safety.reason}},
+            extra={
+                "request_id": request_id,
+                "model_id": settings.model_id,
+                "extra": {"reason": safety.reason},
+            },
         )
         raise HTTPException(status_code=400, detail="Request blocked by safety policy.")
     if safety.adjusted_max_tokens is not None:
@@ -143,7 +159,11 @@ async def chat(request: Request) -> Response:
     if cacheable:
         assert redis is not None
         key = cache_key("chat", payload)
-        cached = await redis.get(key)
+        try:
+            cached = await redis.get(key)
+        except RedisError:
+            cached = None
+
         if cached:
             record_cache_hit("/chat")
             record_request("/chat", "200")
@@ -160,11 +180,13 @@ async def chat(request: Request) -> Response:
 
     try:
         if stream:
+
             async def streamer() -> AsyncIterator[bytes]:
                 async for chunk in stream_with_retry(
                     f"{settings.vllm_base_url}/v1/chat/completions", payload
                 ):
                     yield chunk
+
             record_request("/chat", "200")
             record_latency("/chat", start_time)
             return StreamingResponse(streamer(), media_type="text/event-stream")
@@ -194,7 +216,13 @@ async def chat(request: Request) -> Response:
 
     if cacheable:
         assert redis is not None
-        await redis.setex(key, settings.cache_ttl_seconds, json.dumps(response_payload))
+        try:
+            await redis.setex(key, settings.cache_ttl_seconds, json.dumps(response_payload))
+        except RedisError:
+            logger.warning(
+                "cache_write_failed",
+                extra={"request_id": request_id, "model_id": settings.model_id},
+            )
 
     logger.info(
         "chat_response",

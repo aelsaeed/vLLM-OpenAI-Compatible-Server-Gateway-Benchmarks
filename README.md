@@ -1,125 +1,118 @@
-# llm-serving-gateway-bench
+# vLLM OpenAI-Compatible Server Gateway Benchmarks
 
-Local LLM serving stack using **vLLM (OpenAI-compatible server)** plus a lightweight **FastAPI gateway** with caching, rate limiting, safety toggles, and benchmarking utilities.
+![CI](https://github.com/aelsaeed/vLLM-OpenAI-Compatible-Server-Gateway-Benchmarks/actions/workflows/ci.yml/badge.svg)
 
-## Features
-
-- OpenAI-compatible gateway proxy for chat and embeddings
-- Redis cache with configurable TTL
-- Rate limiting + request size limits
-- Retry with exponential backoff
-- Structured JSON logs (`request_id`, `model_id`)
-- Safety toggles (max tokens cap, denylist demo)
-- Prometheus metrics (`/metrics`)
-
-## Architecture
-
-```
-client -> gateway (FastAPI) -> vLLM OpenAI-compatible server
-                  |-> Redis (cache)
-```
+Local LLM serving stack with a FastAPI gateway in front of a vLLM OpenAI-compatible server.
 
 ## Quickstart
 
 ### Prerequisites
+- Python 3.11+
+- Docker + Docker Compose (for full GPU stack)
+- Optional: NVIDIA GPU + CUDA runtime for vLLM
 
-- Docker + Docker Compose
-- Python 3.11+ (for local dev and benchmarking)
-- Optional: NVIDIA GPU + CUDA drivers (for fast inference)
-
-### Run with GPU (recommended)
-
-1. Edit `infra/docker-compose.yml` to select a model (see `MODEL` below).
-2. Start the stack:
-
-```
-make up
+### Install
+```bash
+python -m pip install --upgrade pip
+pip install -e .[dev]
 ```
 
-This uses the `vllm/vllm-openai` image with GPU access. Ensure the NVIDIA Container Toolkit is installed.
+## Demo modes
 
-### Run without GPU (CPU mode)
+### 1) CPU / no-GPU mock mode (always works)
+Runs a local mock OpenAI-compatible upstream plus the gateway, then validates `/health` and `/chat`.
 
-vLLM is optimized for GPUs. Running on CPU is **not recommended** and may not work for all models.
-If you must run on CPU, set `USE_GPU=0` and expect very slow performance and possible model constraints.
-
-```
-USE_GPU=0 VLLM_HOST=vllm-cpu make up
+```bash
+make demo
 ```
 
-## OpenAI-Compatibility & Model Swapping
-
-The gateway forwards requests to vLLM’s OpenAI-compatible endpoints:
-
-- `POST /v1/chat/completions`
-- `POST /v1/embeddings` (if enabled)
-
-To swap models, update `MODEL` in `infra/docker-compose.yml` or export it when launching:
-
-```
-MODEL=Qwen/Qwen2-0.5B-Instruct make up
+### 2) GPU mode (optional, real vLLM container)
+```bash
+make up-gpu
 ```
 
-Recommended small models:
+You can still use generic profile mode:
+```bash
+make up           # default profile gpu
+USE_GPU=0 make up # cpu profile
+```
 
-- `Qwen/Qwen2-0.5B-Instruct`
-- `TinyLlama/TinyLlama-1.1B-Chat-v1.0`
-- `microsoft/phi-2` (may require extra memory)
+## Architecture
 
-## Gateway Endpoints
-
-- `POST /chat` — forwards to vLLM chat completions (supports streaming)
-- `POST /embed` — embedding pass-through if vLLM supports it; otherwise returns a stub response
-- `GET /health`
-- `GET /metrics` — Prometheus metrics (latency, cache hits, tokens/sec, request counts)
-
-## Configuration
-
-Gateway settings are controlled via `GATEWAY_` environment variables (see `gateway/app/config.py`).
-Examples:
-
-- `GATEWAY_CACHE_TTL_SECONDS=600`
-- `GATEWAY_RATE_LIMIT_RPS=10`
-- `GATEWAY_MAX_TOKENS_CAP=256`
+```mermaid
+flowchart LR
+  C[Client] --> G[Gateway / FastAPI]
+  G --> V[vLLM or Mock OpenAI API]
+  G --> R[(Redis Cache)]
+```
 
 ## Benchmarking
 
-The benchmark script sends concurrent requests and emits a Markdown report under `reports/`.
-
-```
+Run tiny/local benchmark (self-contained mock mode):
+```bash
 make bench
 ```
 
-The report includes p50/p95 latency, throughput (req/s), approximate tokens/sec, and error rate.
+Outputs:
+- timestamped report: `reports/bench-<epoch>.md`
+- latest snapshot: `reports/latest.md`
 
-### Interpreting Results
+Metrics include:
+- p50 latency
+- p95 latency
+- RPS
+- error rate
+- tokens/sec (approx)
 
-- **p50/p95 latency**: median and tail latency per request.
-- **Throughput**: completed requests per second.
-- **Tokens/sec**: approximate rate based on response usage.
-- **Error rate**: failed requests / total.
+Prompt set lives in `data/prompts.jsonl`.
+
+## Gateway hardening knobs
+
+Configured via `GATEWAY_` env vars (`gateway/app/config.py`):
+- `GATEWAY_RATE_LIMIT_RPS`
+- `GATEWAY_RATE_LIMIT_BURST`
+- `GATEWAY_REQUEST_SIZE_LIMIT_BYTES`
+- `GATEWAY_MAX_TOKENS_CAP`
+- `GATEWAY_RETRY_ATTEMPTS`
+- `GATEWAY_RETRY_MIN_SECONDS`
+- `GATEWAY_RETRY_MAX_SECONDS`
+
+Structured JSON logs include `request_id` and `model_id`.
+
+## Performance knobs
+
+- **Batch size (server-side):** tune vLLM launch args in `infra/docker-compose.yml` (for example `--max-num-seqs`).
+- **Max tokens:** request `max_tokens` and gateway cap via `GATEWAY_MAX_TOKENS_CAP`.
+- **Concurrency (benchmark):** `BENCH_CONCURRENCY` or `--concurrency` in `bench/run_bench.py`.
+
+Example:
+```bash
+BENCH_TOTAL_REQUESTS=20 BENCH_CONCURRENCY=4 make bench
+```
+
+## Testing / CI
+
+Local checks:
+```bash
+make lint
+make typecheck
+make test
+make smoke
+make demo
+make bench
+```
+
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests, smoke, mock demo mode, tiny bench mode, and optional Docker Compose validation.
 
 ## Troubleshooting
 
-- **CUDA errors**: verify `nvidia-smi` works and the NVIDIA Container Toolkit is installed.
-- **Model download issues**: ensure you have sufficient disk space and access to the model.
-- **OOM**: use smaller models, reduce `max_tokens`, or set lower batch sizes.
-- **CPU mode issues**: vLLM may not support your model on CPU; use GPU or a smaller model.
+- `make demo` fails: inspect `/tmp/gateway-demo.log` and `/tmp/mock-openai-demo.log`.
+- `make bench` fails: inspect `/tmp/gateway-bench.log` and `/tmp/mock-openai-bench.log`.
+- GPU issues: verify NVIDIA container runtime and use a smaller model.
 
 ## Development
 
-```
-make lint
-make test
-```
-
-## Repository Layout
-
-```
-bench/      # benchmark runner
-data/       # prompt dataset
-gateway/    # FastAPI gateway
-infra/      # docker-compose and infra configs
-reports/    # benchmark reports
-tests/      # pytest coverage
+```bash
+make setup
+pre-commit run --all-files
 ```

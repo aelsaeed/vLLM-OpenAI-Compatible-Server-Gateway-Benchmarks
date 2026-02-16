@@ -15,12 +15,15 @@ class SafetyChecker:
         self._max_tokens_cap = max_tokens_cap
         self._denylist = {word.lower() for word in denylist_words}
 
-    def check(self, payload: dict) -> SafetyResult:
+    def check(self, payload: dict[str, object]) -> SafetyResult:
         messages = payload.get("messages", [])
-        for message in messages:
-            content = str(message.get("content", "")).lower()
-            if any(word in content for word in self._denylist):
-                return SafetyResult(allowed=False, reason="denylist")
+        if isinstance(messages, list):
+            for message in messages:
+                if not isinstance(message, dict):
+                    continue
+                content = str(message.get("content", "")).lower()
+                if any(word in content for word in self._denylist):
+                    return SafetyResult(allowed=False, reason="denylist")
         max_tokens = payload.get("max_tokens")
         if isinstance(max_tokens, int) and max_tokens > self._max_tokens_cap:
             return SafetyResult(
